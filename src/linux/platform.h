@@ -72,6 +72,7 @@ extern long int syscall (long int __sysno, ...);
     union { \
         char kn_extra_buffer[64]; /* Extra data buffer used by some filters (EVFILT_MACHPORT) */ \
     }; \
+    uint64_t kn_canary; /* DEBUG: detects overflow of kn_extra_buffer by the dserver */ \
     union { \
         int kn_timerfd; \
         int kn_signalfd; \
@@ -79,6 +80,8 @@ extern long int syscall (long int __sysno, ...);
         int kn_eventfd; \
         int kn_dupfd; \
     } kdata
+
+#define KN_CANARY_MAGIC 0xCAFED00DBEEF1234ULL
 
 /*
  * Additional members of struct kqueue

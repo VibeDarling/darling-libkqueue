@@ -357,6 +357,18 @@ kevent64_impl(int kqfd, const struct kevent64_s *changelist, int nchanges,
     }
 #endif
 
+#ifdef DARLING_DEBUG
+extern void KQ_DLOG(const char* format, ...);
+#define KQ_DLOG(...) KQ_DLOG(__VA_ARGS__)
+#else
+#define KQ_DLOG(...) ((void)0)
+#endif
+
+    KQ_DLOG("libkqueue: kevent64_impl ENTER kqfd=%d nchanges=%d nevents=%d\n", kqfd, nchanges, nevents);
+    if (!kq) {
+        KQ_DLOG("libkqueue: kevent64_impl kq==NULL\n");
+    }
+
     /*
      * Process each kevent on the changelist.
      */
@@ -386,12 +398,16 @@ kevent64_impl(int kqfd, const struct kevent64_s *changelist, int nchanges,
     if ((flags & KEVENT_FLAG_ERROR_EVENTS) == 0 && nevents > 0) {
         const struct timespec* ts = (flags & KEVENT_FLAG_IMMEDIATE) ? (&timeout_zero) : timeout;
 again:
+        KQ_DLOG("libkqueue: calling kqops.kevent_wait kq=%p nevents=%d\n", (void*)kq, nevents);
         rv = kqops.kevent_wait(kq, nevents, ts);
+        KQ_DLOG("libkqueue: kqops.kevent_wait returned %d\n", rv);
         dbg_printf("kqops.kevent_wait returned %d", rv);
 
         kqueue_lock(kq);
         if (fastpath(rv > 0)) {
+            KQ_DLOG("libkqueue: calling kqops.kevent_copyout rv=%d\n", rv);
             rv = kqops.kevent_copyout(kq, rv, eventlist, nevents);
+            KQ_DLOG("libkqueue: kqops.kevent_copyout returned %d\n", rv);
             ret += rv;
         }
 

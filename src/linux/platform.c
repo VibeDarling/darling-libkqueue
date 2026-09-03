@@ -200,21 +200,53 @@ linux_kevent_copyout(struct kqueue *kq, int nready,
     struct kevent64_s* event;
 
     nret = nready;
+    KQ_DLOG("libkqueue: copyout ENTER nready=%d\n", nready);
     for (i = 0; i < nready; i++) {
         ev = &epevt_get()[i];
         kn = (struct knote *) ev->data.ptr;
         event = eventlist;
+        KQ_DLOG("libkqueue: copyout ev %d kn=%p filter=%d ident=%u canary=0x%llx dupfd=%d\n",
+            i, (void*)kn, kn ? kn->kev.filter : -1, kn ? (unsigned)kn->kev.ident : 0,
+            kn ? (unsigned long long)kn->kn_canary : 0, kn ? kn->kdata.kn_dupfd : -1);
+        if (kn == NULL) {
+            dbg_puts("kevent copyout for NULL knote, discarding!");
+            nret--;
+            continue;
+        }
+        /* DEBUG: canary check. If the dserver (or anything) overflowed the
+         * knote (e.g. kn_extra_buffer), the canary will be smashed. Log a mini
+         * backtrace to localize the caller. */
+        if (kn->kn_canary != 0xCAFED00DBEEF1234ULL) {
+            KQ_DLOG("libkqueue: *** CANARY CORRUPTED kn=%p canary=0x%llx (expect 0xCAFED00DBEEF1234) dupfd=%d filter=%d ident=%u ra0=%p ra1=%p ra2=%p ra3=%p ***\n",
+                (void*)kn, (unsigned long long)kn->kn_canary, kn->kdata.kn_dupfd,
+                kn->kev.filter, (unsigned)kn->kev.ident,
+                (void*)__builtin_return_address(0), (void*)__builtin_return_address(1),
+                (void*)__builtin_return_address(2), (void*)__builtin_return_address(3));
+        }
         if (kn->kev.filter == 0) {
             dbg_puts("kevent copyout for zero filter, discarding!");
             nret--;
             continue;
         }
-        filt = &kq->kq_filt[~(kn->kev.filter)];
+        {
+            short flt = kn->kev.filter;
+            int idx = ~(int)flt;
+            filt = &kq->kq_filt[idx];
+            /* NOTE: do NOT special-case flt==-9 as machport. -9 is EVFILT_FS,
+             * which is handled by evfilt_fs (registered at kq_filt[~(-9)]).
+             * The machport filter is EVFILT_MACHPORT (-8). Routing an FS
+             * knote through the machport copyout (recv on its eventfd) both
+             * fails AND skips the eventfd drain, causing an infinite re-fire
+             * spin. Always dispatch to the filter registered for this id. */
+            KQ_DLOG("libkqueue: copyout kq=%p filt=%p idx=%d kf_id=%d kf_init=%p kf_copyout=%p kn_kq=%p kn=%p\n",
+                (void*)kq, (void*)filt, idx, filt->kf_id, (void*)filt->kf_init, (void*)filt->kf_copyout, (void*)kn->kn_kq, (void*)kn);
+        }
         rv = filt->kf_copyout(event, kn, ev);
+        KQ_DLOG("libkqueue: copyout kf_copyout returned rv=%d ev_filter=%d\n", rv, event->filter);
         if (slowpath(rv < 0)) {
-            dbg_puts("knote_copyout failed");
-            /* XXX-FIXME: hard to handle this without losing events */
-            abort();
+            dbg_puts("knote_copyout failed - dropping event (no abort)");
+            nret--;
+            continue;
         }
 
         /* If an empty kevent structure is returned, the event is discarded. */
@@ -394,7 +426,12 @@ linux_get_descriptor_type(struct knote *kn)
 char *
 epoll_event_dump(struct epoll_event *evt)
 {
-    static __thread char buf[128];
+    // NB: previously this used `static __thread char buf[128]`. Accessing the
+    // TLS block from the kqueue MIG-handler / copyout context crashes (the TLS
+    // for that thread/context is not set up). A plain static buffer avoids the
+    // TLS access entirely. This is only used in debug print paths, so the lack
+    // of per-thread isolation is acceptable here.
+    static char buf[128];
 
     if (evt == NULL)
         return "(null)";

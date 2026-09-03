@@ -49,6 +49,13 @@ knote_new(void)
 
     res->kn_ref = 1;
 
+    /* DEBUG: poison the canary so that any wild write into/around the
+     * knote (e.g. a dserver overflow of kn_extra_buffer) is detectable
+     * at copyout time. */
+#if defined(KNOTE_PLATFORM_SPECIFIC)
+    res->kn_canary = 0xCAFED00DBEEF1234ULL;
+#endif
+
     return (res);
 }
 
