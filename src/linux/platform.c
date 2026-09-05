@@ -23,6 +23,13 @@
 #include "../darling/listenregistry.h"
 #endif
 
+#ifdef DARLING_DEBUG
+extern void kq_dlog_impl(const char* format, ...);
+#define KQ_DLOG(...) kq_dlog_impl(__VA_ARGS__)
+#else
+#define KQ_DLOG(...) ((void)0)
+#endif
+
 /*
  * Per-thread epoll event buffer used to ferry data between
  * kevent_wait() and kevent_copyout().
