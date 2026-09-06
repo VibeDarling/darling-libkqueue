@@ -55,6 +55,9 @@ extern int __simple_sprintf(char *buffer, const char* format, ...);
  * override of linux_syscall / emulated recv). aarch64 syscall numbers.
  * Args forced into ABI registers x0-x5, syscall number into x8. */
 #if defined(__aarch64__) || defined(__arm64__)
+#define RAW_NR_getsockname 204
+#define RAW_NR_sendto      206
+#define RAW_NR_recvfrom    207
 static long raw_syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long a6) {
     register long r0 __asm__("x0") = a1;
     register long r1 __asm__("x1") = a2;
@@ -68,24 +71,48 @@ static long raw_syscall6(long nr, long a1, long a2, long a3, long a4, long a5, l
         : "cc", "memory");
     return r0;
 }
-static long raw_recvfrom(int fd, void* buf, unsigned long len) {
-    return raw_syscall6(207 /* __NR_recvfrom */, fd, (long)buf, len, 0, 0, 0);
-}
-static long raw_sendto(int fd, const void* buf, unsigned long len) {
-    return raw_syscall6(206 /* __NR_sendto */, fd, (long)buf, len, 0, 0, 0);
-}
 #elif defined(__x86_64__)
-static long raw_recvfrom(int fd, void* buf, unsigned long len) {
+#define RAW_NR_getsockname 51
+#define RAW_NR_sendto      44
+#define RAW_NR_recvfrom    45
+static long raw_syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long a6) {
     long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(45 /* __NR_recvfrom */), "D"(fd), "S"(buf), "d"(len), "r"(0), "r"(0) : "rcx", "r11", "memory");
+    register long r10 __asm__("r10") = a4;
+    register long r8  __asm__("r8")  = a5;
+    register long r9  __asm__("r9")  = a6;
+    __asm__ volatile("syscall" : "=a"(ret)
+        : "a"(nr), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
+        : "rcx", "r11", "memory");
     return ret;
 }
-static long raw_sendto(int fd, const void* buf, unsigned long len) {
+#elif defined(__i386__)
+#define RAW_NR_getsockname 367
+#define RAW_NR_sendto      369
+#define RAW_NR_recvfrom    371
+static long raw_syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long a6) {
     long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(44 /* __NR_sendto */), "D"(fd), "S"(buf), "d"(len), "r"(0), "r"(0) : "rcx", "r11", "memory");
+    __asm__ volatile(
+        "pushl %%ebp\n\t"
+        "movl %7, %%ebp\n\t"
+        "int $0x80\n\t"
+        "popl %%ebp\n\t"
+        : "=a"(ret)
+        : "0"(nr), "b"(a1), "c"(a2), "d"(a3), "S"(a4), "D"(a5), "m"(a6)
+        : "memory"
+    );
     return ret;
 }
 #endif
+
+static long raw_recvfrom(int fd, void* buf, unsigned long len) {
+    return raw_syscall6(RAW_NR_recvfrom, fd, (long)buf, len, 0, 0, 0);
+}
+static long raw_sendto(int fd, const void* buf, unsigned long len) {
+    return raw_syscall6(RAW_NR_sendto, fd, (long)buf, len, 0, 0, 0);
+}
+static long raw_getsockname(int fd, void* addr, void* addrlen) {
+    return raw_syscall6(RAW_NR_getsockname, fd, (long)addr, (long)addrlen, 0, 0, 0);
+}
 
 int
 evfilt_machport_copyout(struct kevent64_s *dst, struct knote *src, void *ptr)
@@ -107,7 +134,7 @@ evfilt_machport_copyout(struct kevent64_s *dst, struct knote *src, void *ptr)
 	{
 		char ksock[64];
 		unsigned int ksocklen = sizeof(ksock);
-		long ksockrv = raw_syscall6(204 /* getsockname */, src->kdata.kn_dupfd, (long)ksock, (long)&ksocklen, 0, 0, 0);
+		long ksockrv = raw_getsockname(src->kdata.kn_dupfd, ksock, &ksocklen);
 		if (ksockrv < 0) {
 			KQ_DLOG("machport_copyout: dupfd=%d is not a socket (rv=%ld), dropping event\n", src->kdata.kn_dupfd, ksockrv);
 			return -1;
@@ -200,8 +227,8 @@ evfilt_machport_knote_create(struct filter *filt, struct knote *kn)
 	dbg_printf("evfilt_machport_open: listening to FD %d for events %d", kn->kdata.kn_dupfd, ev.events);
 	{
 		char ksabuf[64]; unsigned int ksl = sizeof(ksabuf);
-		long kgs = raw_syscall6(204, kn->kdata.kn_dupfd, (long)ksabuf, (long)&ksl, 0,0,0);
-		KQ_DLOG("machport_knote_create: kn=%p kn_dupfd=%d raw getsockname(204) rv=%ld\n", (void*)kn, kn->kdata.kn_dupfd, kgs);
+		long kgs = raw_getsockname(kn->kdata.kn_dupfd, ksabuf, &ksl);
+		KQ_DLOG("machport_knote_create: kn=%p kn_dupfd=%d raw getsockname rv=%ld\n", (void*)kn, kn->kdata.kn_dupfd, kgs);
 	}
 
     fcntl(kn->kdata.kn_dupfd, F_SETFD, FD_CLOEXEC);
