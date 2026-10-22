@@ -409,7 +409,9 @@ extern void KQ_DLOG(const char* format, ...);
             nevents -= rv;
             ret += rv;
 
-            // keep going to process more events (if we have room)
+            // On macOS / BSD: if an error occurred while processing changelist,
+            // kevent() returns immediately with the errors in eventlist without waiting.
+            goto out;
         }
     }
 
