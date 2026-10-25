@@ -90,6 +90,9 @@ extern long int syscall (long int __sysno, ...);
     struct epoll_event kq_plist[MAX_KEVENT]; \
     size_t kq_nplist
 
+int linux_fd_knote_create(struct knote *, struct epoll_event *);
+int linux_fd_knote_delete(struct knote *);
+
 int     linux_kqueue_init(struct kqueue *);
 void    linux_kqueue_free(struct kqueue *);
 

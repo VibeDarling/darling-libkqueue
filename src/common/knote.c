@@ -167,3 +167,10 @@ knote_disable(struct filter *filt, struct knote *kn)
 
 //TODO: knote_enable()
 
+
+void knote_delete_all(struct filter *filt)
+{
+    struct knote *kn;
+    while ((kn = RB_MIN(knt, &filt->kf_knote)) != NULL)
+        knote_delete(filt, kn);
+}

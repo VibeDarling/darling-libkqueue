@@ -17,6 +17,7 @@
 # define _GNU_SOURCE
 # include <poll.h>
 #include <pthread.h>
+#include <darling/emulation/linux_premigration/ext/for-libkqueue.h>
 #include "../common/private.h"
 
 #ifdef DARLING
@@ -489,3 +490,31 @@ linux_fd_to_path(char *buf, size_t bufsz, int fd)
     return (readlink(path, buf, bufsz));
 }
 
+
+/* Each filter needs a distinct epoll key even when READ and WRITE watch the
+ * same public descriptor. kqueue_closed_fd removes these copies on close. */
+int linux_fd_knote_create(struct knote *kn, struct epoll_event *event)
+{
+    int fd = _dup_4libkqueue(kn->kev.ident);
+    if (fd < 0) { errno = -fd; return -1; }
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 ||
+        epoll_ctl(kn->kn_epollfd, EPOLL_CTL_ADD, fd, event) < 0) {
+        int error = errno;
+        __close_for_kqueue(fd);
+        errno = error;
+        return -1;
+    }
+    kn->kdata.kn_dupfd = fd;
+    return 0;
+}
+
+int linux_fd_knote_delete(struct knote *kn)
+{
+    if (kn->kdata.kn_dupfd >= 0) {
+        if (!(kn->kev.flags & EV_DISABLE))
+            epoll_ctl(kn->kn_epollfd, EPOLL_CTL_DEL, kn->kdata.kn_dupfd, NULL);
+        __close_for_kqueue(kn->kdata.kn_dupfd);
+        kn->kdata.kn_dupfd = -1;
+    }
+    return 0;
+}
