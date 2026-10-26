@@ -204,6 +204,7 @@ struct knote * knote_new(void);
 void knote_release(struct knote *);
 void knote_insert(struct filter *, struct knote *);
 int  knote_delete(struct filter *, struct knote *);
+void knote_delete_all(struct filter *);
 int  knote_init(void);
 int  knote_disable(struct filter *, struct knote *);
 #define knote_get_filter(knt) &((knt)->kn_kq->kq_filt[(knt)->kev.filter])

@@ -77,23 +77,13 @@ evfilt_socket_knote_create(struct filter *filt, struct knote *kn)
         kn->data.events |= EPOLLONESHOT;
     if (kn->kev.flags & EV_CLEAR)
         kn->data.events |= EPOLLET;
-	kn->kn_epollfd = filter_epfd(filt);
+    kn->kn_epollfd = filter_epfd(filt);
 
     memset(&ev, 0, sizeof(ev));
     ev.events = kn->data.events;
     ev.data.ptr = kn;
 
-	kn->kdata.kn_dupfd = kn->kev.ident;
-
-	if (epoll_ctl(kn->kn_epollfd, EPOLL_CTL_ADD, kn->kdata.kn_dupfd, &ev) < 0) {
-		if (errno == EEXIST) {
-			epoll_ctl(kn->kn_epollfd, EPOLL_CTL_MOD, kn->kdata.kn_dupfd, &ev);
-		} else {
-			dbg_printf("epoll_ctl(2): %s", strerror(errno));
-			return (-1);
-		}
-	}
-    return 0;
+    return linux_fd_knote_create(kn, &ev);
 }
 
 int
@@ -108,7 +98,7 @@ evfilt_socket_knote_modify(struct filter *filt, struct knote *kn,
         kn->data.events |= EPOLLONESHOT;
     if (kn->kev.flags & EV_CLEAR)
         kn->data.events |= EPOLLET;
-	kn->kn_epollfd = filter_epfd(filt);
+    kn->kn_epollfd = filter_epfd(filt);
 
     /* Disabled registrations are added by the enable callback, not MOD. */
     if (kn->kev.flags & EV_DISABLE)
@@ -128,11 +118,7 @@ evfilt_socket_knote_modify(struct filter *filt, struct knote *kn,
 int
 evfilt_socket_knote_delete(struct filter *filt, struct knote *kn)
 {
-	if (kn->kn_epollfd >= 0 && kn->kdata.kn_dupfd >= 0) {
-		epoll_ctl(kn->kn_epollfd, EPOLL_CTL_DEL, kn->kdata.kn_dupfd, NULL);
-	}
-	kn->kdata.kn_dupfd = -1;
-	return 0;
+    return linux_fd_knote_delete(kn);
 }
 
 int
@@ -164,7 +150,7 @@ evfilt_socket_knote_disable(struct filter *filt, struct knote *kn)
 const struct filter evfilt_write = {
     EVFILT_WRITE,
     NULL,
-    NULL,
+    knote_delete_all,
     evfilt_socket_copyout,
     evfilt_socket_knote_create,
     evfilt_socket_knote_modify,
